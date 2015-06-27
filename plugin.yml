@@ -1,0 +1,36 @@
+name: NerdList
+main: nu.nerd.nerdlist.NerdList
+version: ${project.version}
+description: ${project.description}
+website: ${project.url}
+authors: [Dumbo52]
+commands:
+  list:
+    description: Lists all players on a server.
+    usage: /list [<server>|all]
+    permission: nerdlist.list
+  list-hide:
+    description: Hides a player from the list.
+    usage: /list-hide [player]
+    permission: nerdlist.hide
+  list-show:
+    description: Unhides a player from the list.
+    usage: /list-show [player]
+    permission: nerdlist.hide
+  list-reload:
+    description: Reloads configuration and recaches players\' groups.
+    usage: /list-reload
+    permission: nerdlist.reload
+permissions:
+  nerdlist.list:
+    description: Allows use of the /list command.
+  nerdlist.hide:
+    description: Allows use of the /list-hide and /list-show commands.
+  nerdlist.reload:
+    description: Allows use of the /list-reload commands.
+  nerdlist.admin:
+    description: Allows access to all list-related commands.
+    children:
+      nerdlist.list: true
+      nerdlist.hide: true
+      nerdlist.reload: true

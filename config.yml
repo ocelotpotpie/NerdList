@@ -1,0 +1,12 @@
+visibility: ALL
+output:
+  intro: 'Players on %s:'
+  label: '§6%s: '
+  list:
+    colors: [WHITE, GRAY]
+    delimiter: ' '
+  count: '§7Total:§f %d players'
+groups:
+  - name: Default
+    permission: nerdlist.group.default
+    priority: 0
