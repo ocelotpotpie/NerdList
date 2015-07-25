@@ -17,11 +17,13 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 
 /**
@@ -29,9 +31,8 @@ import java.util.TreeSet;
  */
 public class NerdList extends JavaPlugin implements Listener {
 
-    private static NerdList instance;
-
     private int visibility;
+    private Collection<String> aliases;
     private String outputIntro;
     private String outputLabel;
     private List<ChatColor> outputListColors;
@@ -45,16 +46,25 @@ public class NerdList extends JavaPlugin implements Listener {
     private FileConfiguration playerConfig;
     private ListHandler handler;
 
+    private Set<ListServer> servers;
+    private Map<String, ListServer> serverAliases;
+
     @Override
     public void onEnable() {
-        NerdList.instance = this;
-        reloadConfig();
         getServer().getPluginManager().registerEvents(this, this);
         handler = new ListHandler(this);
+        servers = new HashSet<>();
+        serverAliases = new HashMap<>();
         getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
         getServer().getMessenger().registerIncomingPluginChannel(this, "BungeeCord", handler);
+        reloadConfig();
+        handler.sendHandshake();
     }
 
+    @Override
+    public void onDisable() {
+        handler.sendRemoveServer();
+    }
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (command.getName().equalsIgnoreCase("list")) {
@@ -65,19 +75,23 @@ public class NerdList extends JavaPlugin implements Listener {
                     sender.sendMessage(ChatColor.RED + "Cross-server list commands can only be run by players.");
                     return true;
                 }
-                String server = args[0];
-                // TODO Synchronize server list across all servers instead of doing this
-                if (server.equalsIgnoreCase("all")) {
-                    server = "ALL";
-                    sendPlayerList(sender);
+                Player player = (Player) sender;
+                String server = args[0].toLowerCase();
+                if (server.equals("all")) {
+                    sendPlayerList(player);
+                    for (ListServer s : servers) {
+                        handler.sendPreListRequest(s.getName(), player);
+                    }
+                } else if (server.equalsIgnoreCase(serverName)) {
+                    sendPlayerList(player);
                 } else {
-                    server = server.toLowerCase();
-                    if (server.equalsIgnoreCase(serverName)) {
-                        sendPlayerList(sender);
-                        return true;
+                    ListServer s = serverAliases.get(server);
+                    if (s == null || !s.isVisible(player)) {
+                        player.sendMessage(ChatColor.RED + "There are no players on " + server);
+                    } else {
+                        handler.sendPreListRequest(s.getName(), player);
                     }
                 }
-                handler.sendListRequest(server, (Player) sender);
             } else {
                 sender.sendMessage(ChatColor.RED + "Usage: /list [<server|all]");
             }
@@ -126,6 +140,7 @@ public class NerdList extends JavaPlugin implements Listener {
 
         if (command.getName().equalsIgnoreCase("list-reload")) {
             reloadConfig();
+            sender.sendMessage(ChatColor.GREEN + "NerdList configuration reloaded.");
             return true;
         }
         return false;
@@ -154,9 +169,11 @@ public class NerdList extends JavaPlugin implements Listener {
                 break;
         }
 
+        aliases = config.getStringList("aliases");
+
         outputIntro = config.getString("output.intro", "Online players:");
         outputLabel = config.getString("output.label", "§6%s: ");
-        outputListColors = new ArrayList<ChatColor>();
+        outputListColors = new ArrayList<>();
         for (String color : config.getStringList("output.list.colors")) {
             try {
                 outputListColors.add(ChatColor.valueOf(color.toUpperCase()));
@@ -166,7 +183,7 @@ public class NerdList extends JavaPlugin implements Listener {
         }
         outputListDelimiter = config.getString("output.list.delimiter", " ");
         outputCount = config.getString("outputCount", "§7Total:§f %d players");
-        displayGroups = new LinkedList<ListGroup>();
+        displayGroups = new LinkedList<>();
         for (Map group : config.getMapList("groups")) {
             try {
                 String name = (String) group.get("name");
@@ -178,10 +195,10 @@ public class NerdList extends JavaPlugin implements Listener {
                 e.printStackTrace();
             }
         }
-        testGroups = new ArrayList<ListGroup>(displayGroups);
+        testGroups = new ArrayList<>(displayGroups);
         Collections.sort(testGroups);
 
-        hiddenPlayers = new HashSet<String>();
+        hiddenPlayers = new HashSet<>();
         playerConfig = new YamlConfiguration();
         File playerConfigFile = new File(getDataFolder(), "players.yml");
         if (playerConfigFile.exists()) {
@@ -205,7 +222,7 @@ public class NerdList extends JavaPlugin implements Listener {
      * @return the online players
      */
     public Map<ListGroup, Collection<String>> getPlayerList() {
-        Map<ListGroup, Collection<String>> groups = new LinkedHashMap<ListGroup, Collection<String>>();
+        Map<ListGroup, Collection<String>> groups = new LinkedHashMap<>();
         for (ListGroup group : displayGroups) {
             groups.put(group, new TreeSet<>(String.CASE_INSENSITIVE_ORDER));
         }
@@ -231,7 +248,7 @@ public class NerdList extends JavaPlugin implements Listener {
      * @return a list of message strings
      */
     public List<String> toMessageList(Map<?, Collection<String>> list, String server) {
-        List<String> messages = new LinkedList<String>();
+        List<String> messages = new LinkedList<>();
         int count = 0;
         messages.add(String.format(outputIntro, server));
         for (Map.Entry<?, Collection<String>> group : list.entrySet()) {
@@ -286,7 +303,7 @@ public class NerdList extends JavaPlugin implements Listener {
      */
     public void hidePlayer(String player) {
         hiddenPlayers.add(player.toLowerCase());
-        List<String> players = new ArrayList<String>(hiddenPlayers);
+        List<String> players = new ArrayList<>(hiddenPlayers);
         playerConfig.set("hidden", players);
         try {
             playerConfig.save(new File(getDataFolder(), "players.yml"));
@@ -303,7 +320,7 @@ public class NerdList extends JavaPlugin implements Listener {
      */
     public boolean showPlayer(String player) {
         boolean removed = hiddenPlayers.remove(player.toLowerCase());
-        List<String> players = new ArrayList<String>(hiddenPlayers);
+        List<String> players = new ArrayList<>(hiddenPlayers);
         playerConfig.set("hidden", players);
         try {
             playerConfig.save(new File(getDataFolder(), "players.yml"));
@@ -320,6 +337,14 @@ public class NerdList extends JavaPlugin implements Listener {
      */
     public int getVisibility() {
         return visibility;
+    }
+
+    /**
+     * Gets a list of this server's aliases.
+     * @return the aliases
+     */
+    public List<String> getAliases() {
+        return new ArrayList<>(aliases);
     }
 
     /**
@@ -351,23 +376,27 @@ public class NerdList extends JavaPlugin implements Listener {
     }
 
     /**
-     * Gets the current NerdList instance.
+     * Gets a set of all registered servers.
      *
-     * @return the NerdList instance
+     * @return the servers
      */
-    public static NerdList getInstance() {
-        return NerdList.instance;
+    public Set<ListServer> getServers() {
+        return servers;
+    }
+
+    /**
+     * Gets the map of aliases for all registered servers.
+     *
+     * @return the alias map
+     */
+    public Map<String, ListServer> getServerAliases() {
+        return serverAliases;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerJoin(PlayerJoinEvent event) {
         if (serverName == null) {
-            getServer().getScheduler().runTaskLater(this, new Runnable() {
-                @Override
-                public void run() {
-                    handler.requestServerName();
-                }
-            }, 1);
+            handler.flushPlayerQueue();
         }
     }
 

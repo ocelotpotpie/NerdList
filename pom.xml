@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>nu.nerd</groupId>
     <artifactId>nerdlist</artifactId>
-    <version>0.1</version>
+    <version>0.2</version>
     <name>NerdList</name>
     <description>Provides a configurable /list command that works across multiple servers.</description>
     <url>https://github.com/NerdNu/NerdList</url>

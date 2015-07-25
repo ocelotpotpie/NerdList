@@ -1,4 +1,5 @@
 visibility: ALL
+aliases: []
 output:
   intro: 'Players on %s:'
   label: '§6%s: '

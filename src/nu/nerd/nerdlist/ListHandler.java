@@ -2,8 +2,8 @@ package nu.nerd.nerdlist;
 
 import com.google.common.collect.Iterables;
 import com.google.common.io.ByteArrayDataInput;
-import com.google.common.io.ByteArrayDataOutput;
 import com.google.common.io.ByteStreams;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.messaging.PluginMessageListener;
 import org.json.simple.JSONArray;
@@ -13,18 +13,38 @@ import org.json.simple.parser.ParseException;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 
-
+/**
+ * Handles incoming and outgoing plugin messages.
+ */
 public class ListHandler implements PluginMessageListener {
 
     private NerdList plugin;
-    private Queue<ListRequest> requests;
     private JSONParser parser;
+
+    /**
+     * Backlog of requests to be sent once a player joins the server.
+     */
+    private Queue<BungeeRequest> playerQueue;
+
+    /**
+     * Backlog of requests to be sent once we figure out Bungee's name for the
+     * server.
+     */
+    private Queue<JSONForwardRequest> nameQueue;
+
+    /**
+     * Queues of requests that are waiting on a player count from a particular
+     * server to be sent.
+     */
+    private Map<String, Queue<Player>> playerCountQueues;
+
 
     /**
      * Creates a new ListHandler.
@@ -33,7 +53,9 @@ public class ListHandler implements PluginMessageListener {
      */
     public ListHandler(NerdList plugin) {
         this.plugin = plugin;
-        requests = new LinkedList<ListRequest>();
+        playerQueue = new LinkedList<>();
+        nameQueue = new LinkedList<>();
+        playerCountQueues = new HashMap<>();
         parser = new JSONParser();
     }
 
@@ -43,30 +65,126 @@ public class ListHandler implements PluginMessageListener {
             ByteArrayDataInput in = ByteStreams.newDataInput(message);
             String subchannel = in.readUTF();
             switch (subchannel) {
-                case "GetServer":
+                case "GetServer": {
                     String server = in.readUTF();
                     plugin.setServerName(server);
-                    flushQueue();
+                    flushNameQueue();
                     break;
+                }
+                case "PlayerCount": {
+                    String server = in.readUTF();
+                    int count = in.readInt();
+                    flushPlayerCountQueue(server, count);
+                    break;
+                }
+                case "NerdListHandshake": {
+                    JSONObject content = readJSON(in);
+                    String name = (String) content.get("server");
+                    int visibility = ((Long) content.get("visibility")).intValue();
+                    List<String> aliases = (List<String>) content.get("aliases");
+                    ListServer server = new ListServer(name, visibility, aliases);
+                    Map<String, ListServer> aliasMap = plugin.getServerAliases();
+                    aliasMap.put(name.toLowerCase(), server);
+                    for (String alias : aliases) {
+                        aliasMap.put(alias.toLowerCase(), server);
+                    }
+                    sendHandshakeResponse(name);
+                    break;
+                }
+                case "NerdListHandshakeResponse": {
+                    JSONObject content = readJSON(in);
+                    String name = (String) content.get("server");
+                    List<String> aliases = (List<String>) content.get("aliases");
+                    int visibility = ((Long) content.get("visibility")).intValue();
+                    ListServer server = new ListServer(name, visibility, aliases);
+                    Map<String, ListServer> aliasMap = plugin.getServerAliases();
+                    aliasMap.put(name.toLowerCase(), server);
+                    for (String alias : aliases) {
+                        aliasMap.put(alias.toLowerCase(), server);
+                    }
+                    break;
+                }
+                case "NerdListRemoveServer": {
+                    Map<String, ListServer> aliases = plugin.getServerAliases();
+                    ListServer server = aliases.get(in.readUTF());
+                    for (String alias : server.getAliases()) {
+                        aliases.remove(alias);
+                    }
+                }
                 case "NerdListRequest": {
                     JSONObject content = readJSON(in);
-                    if (plugin.getVisibility() > 1 || plugin.getVisibility() > 0 && (boolean) content.get("admin")) {
-                        sendListResponse((String) content.get("server"), (String) content.get("player"));
-                    }
+                    sendListResponse((String) content.get("server"), (String) content.get("player"),
+                            plugin.getVisibility() > 1 ||
+                                    plugin.getVisibility() > 0 && (boolean) content.get("admin"));
                     break;
                 }
                 case "NerdListResponse": {
                     JSONObject content = readJSON(in);
                     Player recipient = plugin.getServer().getPlayer((String) content.get("player"));
                     if (recipient != null) {
-                        plugin.sendMessageList(recipient,
-                                groupListToMap((List<Map<String, Object>>) content.get("groups")),
-                                (String) content.get("server"));
+                        if ((boolean) content.get("permission")) {
+                            plugin.sendMessageList(recipient,
+                                    groupListToMap((List<Map<String, Object>>) content.get("groups")),
+                                    (String) content.get("server"));
+                        } else {
+                            recipient.sendMessage(ChatColor.RED + "There are no players on " + content.get("server"));
+                        }
                     }
                     break;
                 }
             }
         }
+    }
+
+    /**
+     * Notifies other servers that this server is using NerdList
+     */
+    public void sendHandshake() {
+        JSONObject object = new JSONObject();
+        object.put("aliases", plugin.getAliases());
+        object.put("visibility", plugin.getVisibility());
+        sendBungeeMessage(new JSONForwardRequest("ALL", "NerdListHandshake", object), true, true);
+    }
+
+    /**
+     * Respond to a handshake request with this server's info.
+     */
+    public void sendHandshakeResponse(String server) {
+        JSONObject object = new JSONObject();
+        object.put("aliases", plugin.getAliases());
+        object.put("visibility", plugin.getVisibility());
+        sendBungeeMessage(new JSONForwardRequest(server, "NerdListHandshakeResponse", object), true, true);
+    }
+
+    /**
+     * Notifies other servers that this server should be removed.
+     */
+    public void sendRemoveServer() {
+        // This will only fire if there are players online when the plugin is
+        // disabled... Is there a better way of handling this?
+
+        // For now, let's just not send this message until we figure out a
+        // better method of cross-server communication. This won't break
+        // anything too badly.
+        // sendBungeeMessage(new JSONForwardRequest("ALL", "NerdListRemoveServer", new JSONObject()), true, false);
+    }
+
+    /**
+     * Sends a PlayerCount request for the given server, in anticipation of
+     * sending a list request to that server on behalf of the given player upon
+     * response.
+     *
+     * @param server the server
+     * @param player the player
+     */
+    public void sendPreListRequest(String server, Player player) {
+        Queue<Player> players = playerCountQueues.get(server);
+        if (players == null) {
+            players = new LinkedList<>();
+            playerCountQueues.put(server, players);
+            sendBungeeMessage(new PlayerCountRequest(server, player.getName()), false, false);
+        }
+        players.add(player);
     }
 
     /**
@@ -79,87 +197,67 @@ public class ListHandler implements PluginMessageListener {
         JSONObject object = new JSONObject();
         object.put("player", player.getName());
         object.put("admin", player.hasPermission("nerdlist.admin"));
-        sendWithServerName(server, "NerdListRequest", object);
+        sendBungeeMessage(new JSONForwardRequest(server, "NerdListRequest", object), true, false);
     }
 
     /**
-     * Sends this server's player list to the specified player on the given server.
+     * Sends this server's player list to the specified player on the given
+     * server.
      *
      * @param server the server to which to send the list
      * @param player the player to which to send the list
+     * @param permission whether the player has permission to view the list
      */
-    public void sendListResponse(String server, String player) {
+    public void sendListResponse(String server, String player, boolean permission) {
         JSONObject object = new JSONObject();
         object.put("player", player);
-        object.put("groups", groupMapToList(plugin.getPlayerList()));
-
-        sendWithServerName(server, "NerdListResponse", object);
+        object.put("permission", permission);
+        if (permission) {
+            object.put("groups", groupMapToList(plugin.getPlayerList()));
+        }
+        sendBungeeMessage(new JSONForwardRequest(server, "NerdListResponse", object), true, false);
     }
 
     /**
      * Requests the server name registered with BungeeCord.
      */
     public void requestServerName() {
-        ByteArrayDataOutput out = ByteStreams.newDataOutput();
-        out.writeUTF("GetServer");
-        Player player = Iterables.getFirst(plugin.getServer().getOnlinePlayers(), null);
-        if (player != null) {
-            player.sendPluginMessage(plugin, "BungeeCord", out.toByteArray());
-        }
+        sendBungeeMessage(new GetServerRequest(), false, true);
     }
 
     /**
-     * Sends a message to forward to another server, with a "return address".
+     * Sends an arbitrary plugin message to BungeeCord.
      *
-     * @param server the server to which to send the message
-     * @param channel the channel over which to send the message
-     * @param content the message content
+     * @param request the message content
+     * @param appendName whether the server's name should be included in this
+     *                   request
+     * @param queue whether this request should be queued if it cannot
+     *              currently be sent
      */
-    private void sendWithServerName(String server, String channel, JSONObject content) {
-        String localServer = plugin.getServerName();
-        if (localServer == null) {
-            ListRequest request = new ListRequest(server, channel, content);
-            requests.add(request);
-            requestServerName();
-        } else {
-            content.put("server", localServer);
-            sendBungeeMessage(server, channel, content.toJSONString());
+    private void sendBungeeMessage(BungeeRequest request, boolean appendName, boolean queue) {
+        if (appendName) {
+            if (request instanceof JSONForwardRequest) {
+                String server = plugin.getServerName();
+                if (server == null) {
+                    nameQueue.add((JSONForwardRequest) request);
+                    requestServerName();
+                    return;
+                }
+                ((JSONForwardRequest) request).getContent().put("server", server);
+            }
         }
-    }
-
-    /**
-     * Sends an arbitrary message to forward to another server.
-     *
-     * @param server the server to which to send the message
-     * @param channel the channel over which to send the message
-     * @param message the message text
-     */
-    private void sendBungeeMessage(String server, String channel, String message) {
-        ByteArrayDataOutput out = ByteStreams.newDataOutput();
-        out.writeUTF("Forward");
-        out.writeUTF(server);
-        out.writeUTF(channel);
-
-        ByteArrayDataOutput msgOut = ByteStreams.newDataOutput();
-        msgOut.writeUTF(message);
-
-        byte[] bytes = msgOut.toByteArray();
-        out.writeShort(bytes.length);
-        out.write(bytes);
-
         Player player = Iterables.getFirst(plugin.getServer().getOnlinePlayers(), null);
         if (player == null) {
-            throw new RuntimeException("There must be at least one player online to send a message.");
+            if (queue) {
+                playerQueue.add(request);
+                return;
+            }
         }
-        player.sendPluginMessage(plugin, "BungeeCord", out.toByteArray());
+        player.sendPluginMessage(plugin, "BungeeCord", request.toByteArray());
     }
 
     private JSONObject readJSON(ByteArrayDataInput in) {
-        short len = in.readShort();
-        byte[] message = new byte[len];
-        in.readFully(message);
-        ByteArrayDataInput content = ByteStreams.newDataInput(message);
-        String str = content.readUTF();
+        String str = in.readUTF();
         try {
             return (JSONObject) parser.parse(str);
         } catch (ParseException e) {
@@ -168,7 +266,7 @@ public class ListHandler implements PluginMessageListener {
     }
 
     private Map<String, Collection<String>> groupListToMap(List<Map<String, Object>> groups) {
-        Map<String, Collection<String>> groupMap = new LinkedHashMap<String, Collection<String>>();
+        Map<String, Collection<String>> groupMap = new LinkedHashMap<>();
         for (Map<String, Object> group : groups) {
             groupMap.put((String) group.get("name"), (Collection<String>) group.get("players"));
         }
@@ -181,17 +279,66 @@ public class ListHandler implements PluginMessageListener {
             if (!group.getValue().isEmpty()) {
                 JSONObject object = new JSONObject();
                 object.put("name", group.getKey().toString());
-                object.put("players", new ArrayList<String>(group.getValue()));
+                object.put("players", new ArrayList<>(group.getValue()));
                 groupList.add(object);
             }
         }
         return groupList;
     }
 
-    private void flushQueue() {
-        while (!requests.isEmpty()) {
-            ListRequest request = requests.poll();
-            sendWithServerName(request.getServer(), request.getChannel(), request.getContent());
+    /**
+     * Attempts to resend all requests that are waiting on a player to join.
+     */
+    public void flushPlayerQueue() {
+        if (!playerQueue.isEmpty()) {
+            // Messages can't be sent immediately after a player joins, so
+            // we'll wait 1 tick.
+            plugin.getServer().getScheduler().runTaskLater(plugin, new Runnable() {
+                @Override
+                public void run() {
+                    while(!playerQueue.isEmpty()) {
+                        BungeeRequest request = playerQueue.poll();
+                        sendBungeeMessage(request, false, true);
+                    }
+                }
+            }, 1);
+        }
+    }
+
+    /**
+     * Attempts to resend all requests that are waiting for the server's name
+     * to be defined.
+     */
+    public void flushNameQueue() {
+        String server = plugin.getServerName();
+        if (server != null) {
+            while (!nameQueue.isEmpty()) {
+                JSONForwardRequest request = nameQueue.poll();
+                request.getContent().put("server", server);
+                sendBungeeMessage(request, true, true);
+            }
+        }
+    }
+
+    /**
+     * Handles all list requests toward a particular server.
+     *
+     * @param server the server
+     * @param count the server's player count
+     */
+    public void flushPlayerCountQueue(String server, int count) {
+        Queue<Player> players = playerCountQueues.get(server);
+        if (players != null) {
+            while (!players.isEmpty()) {
+                Player player = players.poll();
+                if (player.isOnline()) {
+                    if (count > 0) {
+                        sendListRequest(server, player);
+                    } else {
+                        player.sendMessage(ChatColor.RED + "There are no players on " + server);
+                    }
+                }
+            }
         }
     }
 
