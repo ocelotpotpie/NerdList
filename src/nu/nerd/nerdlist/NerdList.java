@@ -49,6 +49,8 @@ public class NerdList extends JavaPlugin implements Listener {
     private Set<ListServer> servers;
     private Map<String, ListServer> serverAliases;
 
+    public boolean debug;
+
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(this, this);
@@ -183,6 +185,8 @@ public class NerdList extends JavaPlugin implements Listener {
         }
         outputListDelimiter = config.getString("output.list.delimiter", " ");
         outputCount = config.getString("outputCount", "§7Total:§f %d players");
+        debug = config.getBoolean("debug");
+
         displayGroups = new LinkedList<>();
         for (Map group : config.getMapList("groups")) {
             try {

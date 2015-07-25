@@ -11,3 +11,4 @@ groups:
   - name: Default
     permission: nerdlist.group.default
     priority: 0
+debug: false

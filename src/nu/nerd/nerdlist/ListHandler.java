@@ -12,6 +12,7 @@ import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -62,6 +63,10 @@ public class ListHandler implements PluginMessageListener {
     @Override
     public void onPluginMessageReceived(String channel, Player player, byte[] message) {
         if (channel.equals("BungeeCord")) {
+            if (plugin.debug) {
+                plugin.getLogger().info("Received raw plugin message: " + new String(message));
+                plugin.getLogger().info("Raw bytes: " + Arrays.toString(message));
+            }
             ByteArrayDataInput in = ByteStreams.newDataInput(message);
             String subchannel = in.readUTF();
             switch (subchannel) {
@@ -253,7 +258,13 @@ public class ListHandler implements PluginMessageListener {
                 return;
             }
         }
-        player.sendPluginMessage(plugin, "BungeeCord", request.toByteArray());
+
+        byte[] message = request.toByteArray();
+        if (plugin.debug) {
+            plugin.getLogger().info("Sending plugin message: " + new String(message));
+            plugin.getLogger().info("Raw bytes: " + Arrays.toString(message));
+        }
+        player.sendPluginMessage(plugin, "BungeeCord", message);
     }
 
     private JSONObject readJSON(ByteArrayDataInput in) {
