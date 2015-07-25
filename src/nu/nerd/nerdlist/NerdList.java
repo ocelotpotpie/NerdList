@@ -207,7 +207,7 @@ public class NerdList extends JavaPlugin implements Listener {
     public Map<ListGroup, Collection<String>> getPlayerList() {
         Map<ListGroup, Collection<String>> groups = new LinkedHashMap<ListGroup, Collection<String>>();
         for (ListGroup group : displayGroups) {
-            groups.put(group, new TreeSet<String>());
+            groups.put(group, new TreeSet<>(String.CASE_INSENSITIVE_ORDER));
         }
         for (Player player : getServer().getOnlinePlayers()) {
             // TODO cache group membership
