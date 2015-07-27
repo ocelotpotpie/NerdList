@@ -93,20 +93,24 @@ public class ListHandler implements PluginMessageListener {
                     for (String alias : aliases) {
                         aliasMap.put(alias.toLowerCase(), server);
                     }
+                    plugin.getServers().remove(server);
+                    plugin.getServers().add(server);
                     sendHandshakeResponse(name);
                     break;
                 }
                 case "NerdListHandshakeResponse": {
                     JSONObject content = readJSON(in);
                     String name = (String) content.get("server");
-                    List<String> aliases = (List<String>) content.get("aliases");
                     int visibility = ((Long) content.get("visibility")).intValue();
+                    List<String> aliases = (List<String>) content.get("aliases");
                     ListServer server = new ListServer(name, visibility, aliases);
                     Map<String, ListServer> aliasMap = plugin.getServerAliases();
                     aliasMap.put(name.toLowerCase(), server);
                     for (String alias : aliases) {
                         aliasMap.put(alias.toLowerCase(), server);
                     }
+                    plugin.getServers().remove(server);
+                    plugin.getServers().add(server);
                     break;
                 }
                 case "NerdListRemoveServer": {
@@ -312,7 +316,7 @@ public class ListHandler implements PluginMessageListener {
                         sendBungeeMessage(request, false, true);
                     }
                 }
-            }, 1);
+            }, 10);
         }
     }
 

@@ -82,7 +82,9 @@ public class NerdList extends JavaPlugin implements Listener {
                 if (server.equals("all")) {
                     sendPlayerList(player);
                     for (ListServer s : servers) {
-                        handler.sendPreListRequest(s.getName(), player);
+                        if (s.isVisible(player)) {
+                            handler.sendPreListRequest(s.getName(), player);
+                        }
                     }
                 } else if (server.equalsIgnoreCase(serverName)) {
                     sendPlayerList(player);

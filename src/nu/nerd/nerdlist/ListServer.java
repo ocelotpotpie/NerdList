@@ -1,5 +1,6 @@
 package nu.nerd.nerdlist;
 
+import org.apache.commons.lang.builder.EqualsBuilder;
 import org.bukkit.entity.Player;
 
 import java.util.List;
@@ -69,4 +70,12 @@ public class ListServer {
         return name.hashCode();
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+
+        if (o == null || getClass() != o.getClass()) return false;
+
+        return name.equals(((ListServer) o).getName());
+    }
 }
