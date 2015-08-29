@@ -183,7 +183,7 @@ public class NerdList extends JavaPlugin implements Listener {
 
         hiddenPlayers = new HashSet<String>();
         playerConfig = new YamlConfiguration();
-        File playerConfigFile = new File("players.yml");
+        File playerConfigFile = new File(getDataFolder(), "players.yml");
         if (playerConfigFile.exists()) {
             try {
                 playerConfig.load(playerConfigFile);
@@ -289,7 +289,7 @@ public class NerdList extends JavaPlugin implements Listener {
         List<String> players = new ArrayList<String>(hiddenPlayers);
         playerConfig.set("hidden", players);
         try {
-            playerConfig.save("players.yml");
+            playerConfig.save(new File(getDataFolder(), "players.yml"));
         } catch (IOException e) {
             getLogger().warning("An error occurred while saving your player configuration file.");
         }
@@ -306,7 +306,7 @@ public class NerdList extends JavaPlugin implements Listener {
         List<String> players = new ArrayList<String>(hiddenPlayers);
         playerConfig.set("hidden", players);
         try {
-            playerConfig.save("players.yml");
+            playerConfig.save(new File(getDataFolder(), "players.yml"));
         } catch (IOException e) {
             getLogger().warning("An error occurred while saving your player configuration file.");
         }
